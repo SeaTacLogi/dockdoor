@@ -114,16 +114,12 @@ router.post('/', bookingLimiter, (req, res) => {
     db.query(insertSQL, values, async (err, result) => {
       if (err) return res.status(500).json({ error: err.message });
       
-      // Send new appointment email alert
-      try {
-        await sendNewAppointmentAlert({
-          ...req.body,
-          start_time,
-          end_time
-        });
-      } catch (e) {
-        console.error('Email error:', e.message);
-      }
+      // Send the email in the background so the booking never waits for it
+      sendNewAppointmentAlert({
+        ...req.body,
+        start_time,
+        end_time
+      }).catch((e) => console.error('Email error:', e.message));
 
       res.status(201).json({ message: 'Appointment created!', id: result.insertId });
     });

@@ -1,14 +1,27 @@
-const nodemailer = require('nodemailer');
 require('dotenv').config();
 
-// Create transporter using Gmail
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+// Emails are sent through Resend over HTTPS (Railway blocks Gmail's SMTP on this plan).
+const FROM = process.env.EMAIL_FROM || 'JRY Dock Doors <alerts@updates.jrylogistics.com>';
+
+async function sendMail({ to, subject, html }) {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY is missing');
   }
-});
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ from: FROM, to, subject, html })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Resend error ${response.status}: ${text}`);
+  }
+}
 
 // =====================
 // EMAIL 1: New Appointment Alert
@@ -73,9 +86,8 @@ async function sendNewAppointmentAlert(apt) {
     </div>
   `;
 
-  await transporter.sendMail({
-    from: `"JRY Dock Doors" <${process.env.EMAIL_USER}>`,
-    to: process.env.EMAIL_ALERT,
+  await sendMail({
+    to: [process.env.EMAIL_ALERT],
     subject,
     html
   });
@@ -141,9 +153,8 @@ async function sendDailyScheduleReport(appointments) {
     </div>
   `;
 
-  await transporter.sendMail({
-    from: `"JRY Dock Doors" <${process.env.EMAIL_USER}>`,
-    to: [process.env.EMAIL_DAILY_1, process.env.EMAIL_DAILY_2].join(','),
+  await sendMail({
+    to: [process.env.EMAIL_DAILY_1, process.env.EMAIL_DAILY_2],
     subject,
     html
   });
