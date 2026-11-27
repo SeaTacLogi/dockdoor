@@ -2,9 +2,18 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { sendNewAppointmentAlert } = require('../email');
+const { requireAuth } = require('../auth');
+const rateLimit = require('express-rate-limit');
 
-// GET all appointments
-router.get('/', (req, res) => {
+// Customers can book at most 20 times per hour from one computer
+const bookingLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many bookings from this computer. Please try again later.' }
+});
+
+// GET all appointments (staff only)
+router.get('/', requireAuth, (req, res) => {
   const sql = 'SELECT * FROM appointments ORDER BY appointment_date, start_time';
   db.query(sql, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -12,8 +21,8 @@ router.get('/', (req, res) => {
   });
 });
 
-// GET single appointment by ID
-router.get('/:id', (req, res) => {
+// GET single appointment by ID (staff only)
+router.get('/:id', requireAuth, (req, res) => {
   const sql = 'SELECT * FROM appointments WHERE id = ?';
   db.query(sql, [req.params.id], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -22,8 +31,8 @@ router.get('/:id', (req, res) => {
   });
 });
 
-// POST create new appointment
-router.post('/', (req, res) => {
+// POST create new appointment (public, so customers can book)
+router.post('/', bookingLimiter, (req, res) => {
   const {
     appointment_date,
     start_time,
@@ -121,8 +130,8 @@ router.post('/', (req, res) => {
   });
 });
 
-// PUT update appointment status
-router.put('/:id', (req, res) => {
+// PUT update appointment status (staff only)
+router.put('/:id', requireAuth, (req, res) => {
   const { status } = req.body;
   const validStatuses = ['scheduled', 'checked_in', 'in_progress', 'completed', 'cancelled'];
   if (!validStatuses.includes(status)) {
@@ -136,8 +145,8 @@ router.put('/:id', (req, res) => {
   });
 });
 
-// DELETE cancel appointment
-router.delete('/:id', (req, res) => {
+// DELETE cancel appointment (staff only)
+router.delete('/:id', requireAuth, (req, res) => {
   const sql = 'UPDATE appointments SET status = "cancelled", updated_at = NOW() WHERE id = ?';
   db.query(sql, [req.params.id], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });

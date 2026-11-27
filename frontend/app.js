@@ -1,4 +1,79 @@
-const API = 'http://localhost:3000';
+// When the page is opened from a file on your computer, talk to your local server.
+// When it is opened from the live website, talk to the same website.
+const API = location.protocol === 'file:' ? 'http://localhost:3000' : '';
+
+// =====================
+// STAFF LOGIN
+// =====================
+function getToken() {
+  return sessionStorage.getItem('jry_token');
+}
+
+function authHeaders() {
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` };
+}
+
+function updateStaffUI() {
+  const loggedIn = !!getToken();
+  document.getElementById('appointments-section').classList.toggle('hidden', !loggedIn);
+  document.getElementById('staff-login-btn').classList.toggle('hidden', loggedIn);
+  document.getElementById('staff-logout-btn').classList.toggle('hidden', !loggedIn);
+
+  const nameEl = document.getElementById('staff-name');
+  nameEl.classList.toggle('hidden', !loggedIn);
+  nameEl.textContent = loggedIn ? `Hello, ${sessionStorage.getItem('jry_name') || 'staff'}` : '';
+
+  if (loggedIn) {
+    document.getElementById('login-section').classList.add('hidden');
+    loadAppointments();
+  }
+}
+
+function showLogin() {
+  document.getElementById('login-section').classList.remove('hidden');
+  document.getElementById('login-email').focus();
+}
+
+function logout() {
+  sessionStorage.removeItem('jry_token');
+  sessionStorage.removeItem('jry_name');
+  document.getElementById('appointments-list').innerHTML = '';
+  updateStaffUI();
+}
+
+// Called when the server says the login is missing or expired
+function handleUnauthorized() {
+  logout();
+  showToast('Please log in again.', 'error');
+  showLogin();
+}
+
+document.getElementById('login-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  try {
+    const res = await fetch(`${API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: document.getElementById('login-email').value,
+        password: document.getElementById('login-password').value
+      })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      sessionStorage.setItem('jry_token', data.token);
+      sessionStorage.setItem('jry_name', data.name);
+      document.getElementById('login-form').reset();
+      showToast('✅ Logged in', 'success');
+      updateStaffUI();
+    } else {
+      showToast(`❌ ${data.error}`, 'error');
+    }
+  } catch (err) {
+    showToast('❌ Could not connect to server', 'error');
+  }
+});
 
 // =====================
 // LOAD AVAILABLE SLOTS
@@ -85,7 +160,7 @@ document.getElementById('booking-form').addEventListener('submit', async functio
       showToast(`✅ Appointment booked! Confirmation #${data.id}`, 'success');
       document.getElementById('booking-form').reset();
       document.getElementById('apt-time').innerHTML = '<option value="">-- Select a date first --</option>';
-      loadAppointments();
+      if (getToken()) loadAppointments();
     } else {
       showToast(`❌ ${data.error}`, 'error');
     }
@@ -95,14 +170,19 @@ document.getElementById('booking-form').addEventListener('submit', async functio
 });
 
 // =====================
-// LOAD APPOINTMENTS
+// LOAD APPOINTMENTS (staff only)
 // =====================
 async function loadAppointments() {
+  if (!getToken()) return;
+
   const list = document.getElementById('appointments-list');
   list.innerHTML = '<p class="empty-msg">Loading...</p>';
 
   try {
-    const res = await fetch(`${API}/appointments`);
+    const res = await fetch(`${API}/appointments`, { headers: authHeaders() });
+
+    if (res.status === 401) return handleUnauthorized();
+
     const data = await res.json();
 
     if (data.length === 0) {
@@ -116,14 +196,14 @@ async function loadAppointments() {
       card.className = 'appointment-card';
       card.innerHTML = `
         <div class="appointment-info">
-          <h3>${apt.company_name} — ${apt.driver_name}</h3>
+          <h3>${escapeHtml(apt.company_name)} — ${escapeHtml(apt.driver_name)}</h3>
           <p>📅 ${formatDate(apt.appointment_date)} &nbsp;|&nbsp; 🕐 ${formatTime(apt.start_time)} - ${formatTime(apt.end_time)}</p>
-          <p>🚛 Truck: ${apt.truck_number} &nbsp;|&nbsp; Type: ${apt.appointment_type}</p>
-          <p>📋 BOL: ${apt.bol_number} &nbsp;|&nbsp; Ref: ${apt.reference_number}</p>
+          <p>🚛 Truck: ${escapeHtml(apt.truck_number)} &nbsp;|&nbsp; Type: ${escapeHtml(apt.appointment_type)}</p>
+          <p>📋 BOL: ${escapeHtml(apt.bol_number)} &nbsp;|&nbsp; Ref: ${escapeHtml(apt.reference_number)}</p>
         </div>
         <div class="appointment-actions">
-          <span class="status-badge status-${apt.status}">${apt.status.replace('_', ' ')}</span>
-          ${getStatusButtons(apt.id, apt.status)}
+          <span class="status-badge status-${escapeHtml(apt.status)}">${escapeHtml(apt.status.replace('_', ' '))}</span>
+          ${getStatusButtons(Number(apt.id), apt.status)}
         </div>
       `;
       list.appendChild(card);
@@ -134,15 +214,17 @@ async function loadAppointments() {
 }
 
 // =====================
-// UPDATE STATUS
+// UPDATE STATUS (staff only)
 // =====================
 async function updateStatus(id, status) {
   try {
     const res = await fetch(`${API}/appointments/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ status })
     });
+
+    if (res.status === 401) return handleUnauthorized();
 
     const data = await res.json();
     if (res.ok) {
@@ -157,13 +239,19 @@ async function updateStatus(id, status) {
 }
 
 // =====================
-// CANCEL APPOINTMENT
+// CANCEL APPOINTMENT (staff only)
 // =====================
 async function cancelAppointment(id) {
   if (!confirm('Are you sure you want to cancel this appointment?')) return;
 
   try {
-    const res = await fetch(`${API}/appointments/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API}/appointments/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
+
+    if (res.status === 401) return handleUnauthorized();
+
     const data = await res.json();
     if (res.ok) {
       showToast('✅ Appointment cancelled', 'success');
@@ -179,6 +267,12 @@ async function cancelAppointment(id) {
 // =====================
 // HELPERS
 // =====================
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 function getStatusButtons(id, status) {
   if (status === 'cancelled' || status === 'completed') return '';
 
@@ -221,3 +315,6 @@ function showToast(msg, type) {
   toast.className = `toast ${type}`;
   setTimeout(() => { toast.className = 'toast hidden'; }, 4000);
 }
+
+// Show the right screen when the page opens
+updateStaffUI();

@@ -14,6 +14,7 @@ const transporter = nodemailer.createTransport({
 // EMAIL 1: New Appointment Alert
 // =====================
 async function sendNewAppointmentAlert(apt) {
+  apt = safe(apt);
   const subject = `New Appointment Booked - ${apt.company_name}`;
 
   const html = `
@@ -86,6 +87,7 @@ async function sendNewAppointmentAlert(apt) {
 // EMAIL 2: Daily Schedule Report
 // =====================
 async function sendDailyScheduleReport(appointments) {
+  appointments = appointments.map(safe);
   const subject = `JRY Dock Doors — 7-Day Schedule Report`;
 
   let rows = '';
@@ -161,12 +163,32 @@ function formatTime(time) {
   return `${hour12}:${m} ${ampm}`;
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '';
-  const datePart = dateStr.toString().split('T')[0];
-  const [year, month, day] = datePart.split('-').map(Number);
-  const d = new Date(year, month - 1, day);
+function formatDate(value) {
+  if (!value) return '';
+  let d;
+  if (value instanceof Date) {
+    // The database gives a Date object for the 7-day report
+    d = new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  } else {
+    const [year, month, day] = String(value).split('T')[0].split('-').map(Number);
+    d = new Date(year, month - 1, day);
+  }
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Turns special characters into plain text so nobody can sneak code into an email
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function safe(apt) {
+  const out = {};
+  for (const key in apt) {
+    out[key] = typeof apt[key] === 'string' ? escapeHtml(apt[key]) : apt[key];
+  }
+  return out;
 }
 
 module.exports = { sendNewAppointmentAlert, sendDailyScheduleReport };
